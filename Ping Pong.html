@@ -1,0 +1,729 @@
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+<html>
+<div id="title">
+  <div class="logo">
+    <a>Ping Pong!</a>
+  </div>
+</div>
+
+<div style="display: flex;"> <!--display: flex keeps the elements from moving if the page shrinks.-->
+  <canvas class="absolute game" id="gameCanvas" width="800" height="600" autofocus></canvas>
+
+  <div class="absolute page-break" id="buttonPanel">
+    <div class="menu-item-div" id="topButtonContainer"><!--menu-item-div is used to keep divs evenly distrubuted in page-break parent class.-->
+      <button class="set1 btn btn-primary" id="newGame" onclick="reset();">
+        Start
+      </button>
+      <button class="set1 btn btn-primary disabled" id="serveButton" onclick="flags.isSpacePressed = true;">
+        Serve <div style="font-size: 10px;">(Spacebar)</div>
+      </button>
+    </div><!--Top Button Container-->
+
+    <div class="menu-item-div" id="inputGroupContainer">Select Max Score:
+      <div class="input-group" id="selectorGroup">
+        <span class="input-group-btn">
+          <button type="button" class="set2 btn" data-type="minus"
+            onclick="updateWinningScore(-1);">
+            <span class="glyphicon glyphicon-minus" style="margin: auto;"></span>
+          </button>
+        </span>
+          <input type="number" class="form-control" id="selector" value="3" onkeypress="return event.keyCode >= 48 && event.keyCode <= 57">
+        <span class="input-group-btn">
+          <button type="button" class="set2 btn" data-type="plus"
+            onclick="updateWinningScore(1);">
+            <span class="glyphicon glyphicon-plus"></span>
+          </button>
+        </span>
+      </div><!--Selector Group-->
+    </div><!--Input Group Container-->
+
+    <div class="menu-item-div page-break" id="gameModeContainer">Select Game Mode:
+      <button class="active set3 btn" id="Solo" style="margin-top: 5px; border-top-left-radius: 12px; border-top-right-radius: 12px;" onclick="changeGameMode.setSolo();">
+        Solo
+      </button>
+      <button class="set3 btn" id="Two Player" onclick="changeGameMode.setTwoPlayer();">
+        Two Player
+      </button>
+      <button class="set3 btn" id="Practice" style="border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;" onclick="changeGameMode.setPratice();">
+        Practice
+      </button>
+    </div><!--Game Mode Container-->
+
+  </div><!--Button Panel-->
+</div>
+
+<div class="absolute" id="gameInfoContainer">
+  <div id="gameInfo">
+    <span style="text-align: left;" > Winning Score: &nbsp;</span><span style="width: 110px; text-align: left;" id="winningScore"> --- </span>
+    <span style="text-align: right;"> Ball Speed:</span>          <span style="width: 110px;"                   id="ballSpeed"   > --- </span>
+    <span style="text-align: right;"> Game Type: &nbsp;</span>    <span style="width: 110px;"                   id="gameMode"    > --- </span>
+  </div>
+</div>
+
+<script>
+//Initial variables:
+var canvas = document.getElementById('gameCanvas');;
+var canvasContext = canvas.getContext('2d');
+var inputSelector = document.getElementById('selector');
+var framesPerSecond = 60;
+var ballX; //Ball X position.
+var ballY; //Ball Y position.
+var ballSpeedX; //X direction speed.
+var ballSpeedY; //Y direction speed.
+var deltaY; //Difference in Y between ball and paddle when hit.
+var paddle1Y = 250; //Player 1 paddle starting position.
+var paddle2Y = 250; //Computer paddle starting position.
+
+const BALL_SIZE = 10;
+const PADDLE_WIDTH  = 10;
+const PADDLE_HEIGHT = 100;
+const LEFT_PADDLE_OFFSET  = 10;
+const RIGHT_PADDLE_OFFSET = document.getElementById("gameCanvas").width - PADDLE_WIDTH - 10;
+
+var flags = {
+  isNew: true, //Page just loaded for the first time and nothing has been done yet. Set to false once reset() is called.
+  isAlive: false,
+  isSpacePressed: false,
+  isEnterPressed: false,
+  isLeftPressed:  false,
+  isRightPressed: false,
+  isSolo: true, //Default game mode.
+  isTwoPlayer: false,
+  isPractice: false
+}
+//Var holds all conditions that are subject to change to regulate the game. These values adopt the settings values once reset() is called.
+var conditions = {
+  gameOver: false,
+  practiceRoundOver: false,
+  winner: '',
+  p1: 'Player 1',
+  p2: '',
+  p1Score: 0,
+  p2Score: 0,
+  practiceHits: 0,
+  lastScored: '',
+  servingDirection: 'Right',
+  ballSpeed: 0,
+  winningScore: 3,
+  gameMode: '',
+  p2Name: 'Computer',
+  p2Color: '',
+  boardColor: 'black'
+}
+//Holds all custom settings for the game. Used as a buffer for changing the conditions values.
+var settings = {
+  winningScore: Number(document.getElementById('selector').value),
+  gameMode: 'Solo',
+  p2: 'Computer',
+  p2Color: 'red',
+  boardColor: 'black'
+}
+//Var holds all key handler functions.
+var keyHandlers = {
+  //Key down Handlers:
+  spaceDownHandler: evt => {
+    if (evt.keyCode == 32 && !flags.isAlive && !conditions.gameOver && !flags.isNew)
+      flags.isSpacePressed = true;
+  },
+  enterDownHandler: evt => {
+    if (evt.keyCode == 13)
+      flags.isEnterPressed = true;
+  },
+  leftDownHandler: evt => {
+    if (evt.keyCode == 37 && conditions.gameMode != 'Solo')
+      flags.isLeftPressed = true;
+  },
+  rightDownHandler: evt => {
+    if (evt.keyCode == 39 && conditions.gameMode != 'Solo')
+      flags.isRightPressed = true;
+  },
+  //Key up Handlers:
+  leftUpHandler: evt => {
+    if (evt.keyCode == 37)
+      flags.isLeftPressed = false;
+  },
+  rightUpHandler: evt => {
+    if (evt.keyCode == 39)
+      flags.isRightPressed = false;
+  }
+}
+//Functions to change the game mode.
+var changeGameMode = {
+  setSolo: () => {
+    settings.gameMode   = 'Solo';
+    settings.boardColor = 'black';
+    settings.p2Color    = 'red';
+    settings.p2         = 'Computer';
+    document.getElementById("inputGroupContainer").className = "menu-item-div";
+    document.getElementById("Solo").className       = "active set3 btn"; //Change button display to highlight clicked button.
+    document.getElementById("Two Player").className = "set3 btn";
+    document.getElementById("Practice").className   = "set3 btn";
+  },
+  setTwoPlayer: () => {
+    settings.gameMode   = 'Two Player<div style="font-size: 12px;">(Use arrow keys)</div>'; //Second div adds instructions how to play.
+    settings.boardColor = 'black';
+    settings.p2Color    = 'green';
+    settings.p2         = 'Player 2';
+    document.getElementById("inputGroupContainer").className = "menu-item-div";
+    document.getElementById("Solo").className       = "set3 btn";
+    document.getElementById("Two Player").className = "active set3 btn"; //Change button display to highlight clicked button.
+    document.getElementById("Practice").className   = "set3 btn";
+  },
+  setPratice: () => {
+    settings.gameMode           = 'Practice';
+    settings.boardColor         = '#072800';
+    conditions.servingDirection = 'Left';
+    document.getElementById("inputGroupContainer").className = "menu-item-div gone"; //Hide the inputGroupContainer since it isn't relavant to this game mode.
+    document.getElementById("Solo").className       = "set3 btn";
+    document.getElementById("Two Player").className = "set3 btn";
+    document.getElementById("Practice").className   = "active set3 btn"; //Change button display to highlight clicked button.
+  }
+}
+//Function to grab X and Y coordinate data from mouse position in the canvas.
+function calculateMousePos(evt){
+  var rect = canvas.getBoundingClientRect();
+  var root = document.documentElement;
+  var mouseX = evt.clientX - rect.left - root.scrollLeft;
+  var mouseY = evt.clientY - rect.top  - root.scrollTop;
+  return {
+    x: mouseX,
+    y: mouseY
+  };
+}
+//Checked if the input field value in inputGroupContainer is within the correct bounds. High numbers switch to 11 and low switch to 1.
+function isValidNumber(str){
+    if (Number(str) == 0)
+      inputSelector.value = "1";
+    else if (Number(str) > 11)
+      inputSelector.value = "11";
+}
+
+/* LOAD GAME HERE:
+ * drawGame() is called by setInterval() every second divded by 60 frames, or 60 frames a second.
+ * Document event listeners are added to monitor keyboard and mouse input.
+ * window.onload is effectively the entry point of the app.
+ */
+window.onload = () => {
+  console.log('Start Game!');
+  console.log(settings.winningScore);
+
+  setInterval(drawGame, 1000/framesPerSecond); //Game refreshes 60 frames per second.
+  //setInterval(computerMovement, 1000/150); //Computer paddle refreshes 150 frames per second.
+  //Mouse event listener.
+  canvas.addEventListener('mousemove', evt => {
+    var mousePos = calculateMousePos(evt);
+    paddle1Y = mousePos.y - (PADDLE_HEIGHT/2);
+  });
+  //Key press and release event listeners.
+  document.addEventListener('keydown', keyHandlers.spaceDownHandler, false);
+  document.addEventListener('keydown', keyHandlers.enterDownHandler, false);
+  document.addEventListener('keydown', keyHandlers.leftDownHandler, false);
+  document.addEventListener('keydown', keyHandlers.rightDownHandler, false);
+  document.addEventListener('keyup', keyHandlers.leftUpHandler, false);
+  document.addEventListener('keyup', keyHandlers.rightUpHandler, false);
+  //Click event listener for the selector input.
+  document.getElementById('selector').addEventListener('blur', () => {
+    isValidNumber(inputSelector.value);
+    updateWinningScore(0)
+  });
+}
+
+//Creates rectangle with specified left and top coordinate, width and height, and color.
+function colorRect(leftX, topY, width, height, drawColor){
+  canvasContext.fillStyle = drawColor;
+  canvasContext.fillRect(leftX, topY, width, height);
+}
+//Updates winning score.
+function updateWinningScore(x){
+  if ((settings.winningScore + x) >= 1 && (settings.winningScore + x) <= 11){
+    settings.winningScore = Number(inputSelector.value) + x;
+    inputSelector.value = (settings.winningScore).toString();
+    console.log(settings.winningScore);
+  }
+}
+//Creates the position and speed of the new ball.
+function serveBall(){
+  //If serving direction is right, ball will go in positive direction (to the right).
+  //Ball initially goes up or down at random
+  var servingDirection = conditions.servingDirection == 'Right' ? 1 : -1;
+  var verticalDirection = Math.floor(Math.random()*2) == 1 ? 1 : -1;
+  ballX = canvas.width/2;
+  ballY = canvas.height/2;
+  ballSpeedX = ((Math.random() * 3.5) + 2) * servingDirection;
+  ballSpeedY = ((Math.random() * 3.5) + 2) * verticalDirection;
+  //Since ball settings are established, serve ball by setting flag to true.
+  flags.isAlive = true;
+  console.log('X speed: ' + ballSpeedX + ' Y speed: ' + ballSpeedY);
+  showBallSpeed();
+}
+
+//Updates the drawing of the ball, hence moving it.
+function moveBall(){
+  if (flags.isAlive){
+    canvasContext.fillStyle = 'orange';
+    canvasContext.beginPath();
+    canvasContext.arc(ballX, ballY, BALL_SIZE, 0, Math.PI*2, true);
+    canvasContext.fill();
+    ballX += ballSpeedX;
+    ballY += ballSpeedY;
+
+    //Check for Player 1 paddle intersection.
+    if (ballX <= PADDLE_WIDTH + LEFT_PADDLE_OFFSET && ballY >= paddle1Y && ballY <= paddle1Y + PADDLE_HEIGHT){
+      ballSpeedX *= -1.2; //Ball gains speed after reversing direction.
+      deltaY = ballY - (paddle1Y + PADDLE_HEIGHT/2); //Difference between ball's vertical position and paddle center.
+      ballSpeedY = deltaY/5; //Y speed is higher if ball hits paddle further from center.
+      console.log('X speed: ' + ballSpeedX + ' Y speed: ' + ballSpeedY);
+      showBallSpeed();
+    }
+    //Check for Player 2 paddle intersection.
+    if (ballX >= RIGHT_PADDLE_OFFSET - PADDLE_WIDTH && ballY >= paddle2Y && ballY <= paddle2Y + PADDLE_HEIGHT && conditions.gameMode != 'Practice'){
+      ballSpeedX *= -1.2; //Ball gains speed after reversing direction.
+      deltaY = ballY - (paddle2Y + PADDLE_HEIGHT/2); //Difference between ball's vertical position and paddle center.
+      ballSpeedY = deltaY/5; //Y speed is higher if ball hits paddle further from center.
+      console.log('X speed: ' + ballSpeedX + ' Y speed: ' + ballSpeedY);
+      showBallSpeed();
+    }
+    //Check for floor and ceiling intersection.
+    else if (ballY >= canvas.height || ballY <= 0){
+      ballSpeedY *= -1.1;
+      console.log('X speed: ' + ballSpeedX + ' Y speed: ' + ballSpeedY);
+      showBallSpeed();
+    } //Otherwise the ball is gone if it intersects the left or right wall.
+    else if (ballX <= 0){ //Player 2 scores and serving direction is left.
+      flags.isAlive = false;
+      if (conditions.gameMode != 'Practice'){ //Must be in solo mode or two player mode.
+        conditions.p2Score++;
+        conditions.servingDirection = 'Left';
+        conditions.lastScored = conditions.p2;
+        if (conditions.p2Score == conditions.winningScore){
+          gameEnd(conditions.lastScored);
+          return;
+        }
+        console.log('P2 score');
+        switchServeButton('active', false);
+        return;
+      } else { //If in practice mode, the round is marked as over.
+        conditions.practiceRoundOver = true;
+        console.log('Practice round over');
+        switchServeButton('active', false);
+      }
+    }
+    else if (ballX >= canvas.width){ //Player 1 scores and serving direction is right.
+      if (conditions.gameMode != "Practice"){
+        flags.isAlive = false;
+        conditions.p1Score++;
+        conditions.servingDirection = 'Right';
+        conditions.lastScored = conditions.p1;
+        if (conditions.p1Score == conditions.winningScore){
+          gameEnd(conditions.lastScored);
+          return;
+        }
+        console.log('P1 score');
+        switchServeButton('active', false);
+        return;
+      } else {
+        ballSpeedX *= -1; //Ball gains speed after reversing direction.
+        conditions.practiceHits++;
+        console.log(conditions.practiceHits);
+        console.log('X speed: ' + ballSpeedX + ' Y speed: ' + ballSpeedY);
+        showBallSpeed();
+      }
+    }
+  }
+}
+//Uses formula a^2 + b^2 = c^2 to get speed. displays two decimal places. displays result to the HTML.
+function showBallSpeed(){
+  conditions.ballSpeed = Math.sqrt(Math.pow(ballSpeedX, 2) + Math.pow(ballSpeedY, 2)).toFixed(2)
+  document.getElementById("ballSpeed").innerHTML = conditions.ballSpeed;
+}
+//Welcome screen only shown when the page is loaded for the first time.
+function displayWelcomeScreen(){
+  var gradient = canvasContext.createLinearGradient(0, 0, canvas.width, 0);
+  gradient.addColorStop('0','white');
+  canvasContext.font = '60px Verdana';
+  canvasContext.fillStyle = gradient;
+  canvasContext.fillText('Welcome to PONG!', canvas.width/2, canvas.height/2);
+  canvasContext.font = '20px Verdana';
+  canvasContext.fillText('Press "Start" to play!', canvas.width/2, canvas.height/2 + 50);
+  canvasContext.textAlign = 'center';
+}
+//Board used for showing important information like scores.
+function createMiniDisplayBoard(color){
+  colorRect(canvas.width/2-122.5, canvas.height/2-72.5, 245, 145, color); //Box border for the score box.
+  colorRect(canvas.width/2-120, canvas.height/2-70, 240, 140, 'black'); //Box to show the score.
+}
+//Shows the scores for the unique cases of practice mode.
+function displayPracticeScores(){
+  var gradient = canvasContext.createLinearGradient(0, 0, canvas.width, 0); //Show the scores in the corners.
+  gradient.addColorStop('0', 'white');
+  canvasContext.font = '30px Verdana';
+  canvasContext.textAlign = 'left';
+  canvasContext.fillStyle = gradient;
+  canvasContext.fillText("Hits: " + conditions.practiceHits, 100, 50);
+  if (conditions.practiceRoundOver){ //If the round is over in practice mode, show the total hits the player got.
+    createMiniDisplayBoard('#4286f4');
+    var gradient = canvasContext.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop('0', 'white');
+    canvasContext.fillStyle = gradient;
+    canvasContext.font = '30px Verdana';
+    canvasContext.textAlign = 'center';
+    canvasContext.fillText('Round Over', canvas.width/2, canvas.height/2 - 30);
+    canvasContext.font = '15px Verdana';
+    canvasContext.textAlign = 'left';
+    canvasContext.fillText('Total Hits:   ' + conditions.practiceHits, canvas.width/2 - 87, canvas.height/2);
+    canvasContext.fillText('Ball Speed: ' + conditions.ballSpeed, canvas.width/2 - 87, canvas.height/2 + 20);
+    canvasContext.textAlign = 'center';
+    canvasContext.fillText('Press "Serve" to start again.', canvas.width/2, canvas.height/2 + 50);
+  }
+  else if (!flags.isAlive && !flags.isNew) { //Else we are in practice mode and displaying a generic text box.
+    createMiniDisplayBoard('#4286f4');
+    var gradient = canvasContext.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop('0', 'white');
+    canvasContext.fillStyle = gradient;
+    canvasContext.textAlign = 'center';
+    canvasContext.font = '60px Verdana';
+    canvasContext.fillText('Ready?', canvas.width/2, canvas.height/2+25);
+  }
+}
+//Create text to display the scores. Text varries between beginning, during and end of the game.
+function displayScores(){
+  if (conditions.gameMode == 'Practice'){ //Revert to diferent function if this condition is met. Then return.
+    displayPracticeScores();
+    return;
+  }
+  //Show both player scores if in solo or two player.
+  var gradient = canvasContext.createLinearGradient(0, 0, canvas.width, 0); //Show the scores in the corners.
+  gradient.addColorStop('0', 'white');
+  canvasContext.font = '30px Verdana';
+  canvasContext.fillStyle = gradient;
+  canvasContext.fillText(conditions.p1Score, 100, 50);
+  canvasContext.fillText(conditions.p2Score, canvas.width - 100, 50);
+  /*If game is over, display the game over text.*/
+  if (conditions.gameOver){
+    var gradient2 = canvasContext.createLinearGradient(0, 0, canvas.width, 0);
+    gradient2.addColorStop('0', 'white');
+    canvasContext.font = '60px Verdana';
+    canvasContext.fillStyle = gradient2;
+    canvasContext.fillText(conditions.winner + ' wins!', canvas.width/2, canvas.height/2);
+    canvasContext.font = '20px Verdana';
+    canvasContext.fillText('Press "Start" to play again.', canvas.width/2, canvas.height/2 + 50);
+    canvasContext.textAlign = 'center';
+  }
+  /*Else if a player scored but the round is not yet over, show the current score*/
+  else if (!flags.isAlive && !flags.isNew && conditions.gameMode != 'Practice'){
+    createMiniDisplayBoard('#FF9300');
+    var gradient3 = canvasContext.createLinearGradient(0, 0, canvas.width, 0);
+    gradient3.addColorStop('0', 'white');
+    canvasContext.fillStyle = gradient3;
+    if (conditions.lastScored != ''){ //If someone scored last, show the name of who scored.
+      canvasContext.font = '15px Verdana';
+      canvasContext.fillText(conditions.lastScored + ' scores!', canvas.width/2, canvas.height/2 - 40);
+      canvasContext.textAlign = 'center';
+    }
+    canvasContext.font = '60px Verdana';
+    canvasContext.fillText(conditions.p1Score + ' - ' + conditions.p2Score, canvas.width/2, canvas.height/2+25);
+    canvasContext.textAlign = 'center';
+  }
+}
+//Make the net.
+function makeNet(){
+  if (!conditions.gameOver){ //Only drawn when the game is not over.
+    for (var i = 0; i < canvas.height; i += 36.25){//canvas width - length of line / # of lines wanted.
+      colorRect(canvas.width/2-1, i, 2, 20, 'white');
+    }
+  }
+}
+//Reset the game. Load settings variables into the matchings conditions variables.
+function reset(){
+  flags.isNew          = false;
+  flags.isAlive        = false;
+  conditions.gameOver          = false;
+  conditions.practiceRoundOver = false;
+  conditions.winner            = '';
+  conditions.lastScored        = ''
+  conditions.p1Score           = 0;
+  conditions.p2Score           = 0;
+  conditions.practiceHits      = 0;
+  conditions.winningScore      = settings.winningScore;
+  conditions.gameMode          = settings.gameMode;
+  conditions.p2                = settings.p2;
+  conditions.p2Color           = settings.p2Color;
+  conditions.boardColor        = settings.boardColor;
+  switchServeButton('active', false);
+  //If game mode is practice mode, winning score is displayed as ---.
+  document.getElementById("winningScore").innerHTML = conditions.gameMode != 'Practice' ? conditions.winningScore : '---';
+  document.getElementById("ballSpeed").innerHTML    = '---';
+  document.getElementById("gameMode"    ).innerHTML = conditions.gameMode;
+}
+//Turns the serve button on or off. First argument is string for class name. Second is boolean.
+function switchServeButton(status, isOn){
+  document.getElementById('serveButton').className = "set1 btn btn-primary " + status;
+  document.getElementById('serveButton').disabled = isOn;
+}
+//Marks the game conditions as game over.
+function gameEnd(winner){
+  conditions.winner = winner;
+  conditions.gameOver = true;
+  console.log('Game Over!');
+  console.log(winner + ' won');
+}
+//Basic AI function to move the opponent's paddle.
+function computerMovement(){
+  var paddle2YCenter = paddle2Y + PADDLE_HEIGHT/2;
+  if (flags.isAlive && conditions.gameMode == 'Solo'){
+    if (paddle2YCenter < ballY - 35)
+      paddle2Y += 6;
+    else if (paddle2YCenter > ballY + 35)
+      paddle2Y -= 6;
+  }
+}
+
+/* DRAW GAME:
+ * Everything on the canvas is displayed through this function.
+ * All functions to draw shapes and simulate movement are called here.
+ * Flags are evaluated first to accomodate special cases such as key inputs.
+ */
+function drawGame(){
+  //If ball is gone, the game is not over and the spacebar is pressed, then serve the ball again.
+  if (!flags.isAlive && !conditions.gameOver && flags.isSpacePressed){
+    flags.isSpacePressed = false;
+    conditions.practiceRoundOver = false;
+    conditions.practiceHits = 0;
+    switchServeButton('disabled', true);
+    serveBall();
+    console.log('New Serve!');
+  }
+  if (flags.isEnterPressed){
+    flags.isEnterPressed = false;
+    document.getElementById("selector").blur(); //Lose focus from the selector input field.
+    isValidNumber(inputSelector.value); //Check to see if number input is valid.
+    updateWinningScore(0); //Set winning score to input value. Pass 0 as argument so nothing gets added.
+  }
+  if(flags.isLeftPressed && paddle2Y + PADDLE_HEIGHT <= canvas.height) //Move paddle down.
+    paddle2Y += 10;
+  if(flags.isRightPressed && paddle2Y >= 0) //Move paddle up.
+    paddle2Y -= 10;
+  //Create the gameboard.
+  colorRect(0, 0, canvas.width, canvas.height, conditions.boardColor);
+  //Show welcome screen if the page is just loaded.
+  if (flags.isNew){
+    displayWelcomeScreen();
+    return;
+  }
+  //Create the net.
+  makeNet();
+  //Left player paddle.
+  colorRect(LEFT_PADDLE_OFFSET, paddle1Y, PADDLE_WIDTH, PADDLE_HEIGHT, 'white');
+  //Right player paddle. (If not in practice mode)
+  if (conditions.gameMode != 'Practice')
+    colorRect(RIGHT_PADDLE_OFFSET, paddle2Y, PADDLE_WIDTH, PADDLE_HEIGHT, conditions.p2Color);
+  //Move the ball.
+  moveBall();
+  //Computer moves their paddle.
+  computerMovement();
+  //Show the score.
+  displayScores();
+}
+
+</script>
+
+<style>
+  /*Show boundaries to all divs and spans.*/
+  /*div, span{
+    border: 1px solid cyan;
+  }*/
+    /*Button Styles*/
+  .set1 {
+    display: block;
+    outline: none;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    width: 100%;
+  	height: 60px;
+    margin-bottom: 70px;
+    font-size: 20px;
+  }
+  .set2, .set2:hover {
+    display: inline-block;
+    color: #ffffff;
+    background-color: #efae00;
+    font-size: 15px;
+    cursor: pointer;
+    outline: none;
+    border: none;
+    border-radius: 12px;
+    width: 75px;
+    height: 30px;
+  }
+  .set2:active {
+    background-color: #aa7900;
+    -webkit-box-shadow: inset 0px 0px 5px #c1c1c1;
+       -moz-box-shadow: inset 0px 0px 5px #c1c1c1;
+            box-shadow: inset 0px 0px 5px #c1c1c1;
+    border-radius: 12px;
+    cursor: pointer;
+    height: 30px;
+    font-size: 15px;
+  }
+  .set3 {
+    flex-grow: 1;
+    outline: none;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    font-size: 20px;
+    border-radius: 0px;
+    background-color: #5b4700;
+    border: 1px solid black;
+  }
+  .set3:hover {
+    background-color: #efae00;
+    color: white;
+  }
+  .set3:active, .set3.active:active {
+    background-color: #efae00;
+    -webkit-box-shadow: inset 0px 0px 15px #ffefaf;
+       -moz-box-shadow: inset 0px 0px 15px #ffefaf;
+            box-shadow: inset 0px 0px 15px #ffefaf;
+    color: black;
+  }
+  .set3.active {
+    background-color: #efae00;
+    color: white;
+  }
+  .input-group {
+    margin-top: 5px;
+  }
+  .page-break { /*This class causes all divs to be evenly distributed throughout parent div*/
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+  }
+  .absolute {
+    position: left;
+    float: middle;
+  }
+  .gone {
+    opacity: 0;
+  }
+
+  body {
+    background-color: #02111b;
+  }
+  #title {
+    margin-left: 20px;
+    width: 810px;
+  }
+  #gameCanvas {
+    margin-left: 20px;
+    border: 5px solid #2a5e02;
+  }
+  #buttonPanel {
+    margin-left: 10px;
+    width:       250px;
+    min-width:   250px; /*Prevents size from shrinking if the page gets smaller.*/
+    height:      610px;
+    border: 5px solid #3c4d68;
+  }
+  #topButtonContainer {
+    text-align: center;
+    width: 95%;
+    height: 50%;
+    margin: 5px auto;
+    /*border: 1px solid yellow;*/
+  }
+  #inputGroupContainer {
+    text-align: center;
+    font-family: Verdana;
+    font-size: 15px;
+    color: white;
+    width: 95%;
+    height: 10%;
+    margin: 5px auto;
+    /*border: 1px solid cyan;*/
+  }
+  #selector {
+    text-align: center;
+    color: #111111;
+    height: 30px;
+    margin: 0 auto;
+    font-size: 20px;
+  }
+  #gameModeContainer {
+    text-align: center;
+    font-family: Verdana;
+    font-size: 15px;
+    color: white;
+    width: 95%;
+    height: 40%;
+    margin: 5px auto;
+    margin-top: 20px;
+    /*border: 1px solid orange;*/
+  }
+  #gameInfoContainer {
+    margin-left: 20px;
+    margin-top:  10px;
+    width:  810px;
+    height: 60px;
+    /*border: 1px solid red;*/
+  }
+  #gameInfo {
+    display: table;
+    margin: auto; /*This centers the div in the center of the parent div.*/
+    width: 790px;
+    height: 60px;
+    /*border: 1px solid blue;*/
+  }
+  #gameInfo span {
+    display: table-cell; /*This creates equidistant space between all span elements in this div.*/
+    text-align: center;
+    font-size: 20px;
+    font-family: Verdana;
+    color: white;
+    /*border: 1px solid yellow;*/
+  }
+  input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .logo {
+    margin: 50px auto;
+    text-align: center;
+  }
+  .logo a {
+    text-decoration: none;
+    -webkit-transform: perspective(2.5em) rotateX(15deg) scaleY(0.8);
+    -moz-transform: perspective(2.5em) rotateX(15deg) scaleY(0.8);
+    -ms-transform: perspective(2.5em) rotateX(15deg) scaleY(0.8);
+    -o-transform: perspective(2.5em) rotateX(15deg) scaleY(0.8);
+    transform: perspective(2.5em) rotateX(15deg) scaleY(0.8);
+    -webkit-transition: all 0.5s;
+    -moz-transition: all 0.5s;
+    transition: all 0.5s;
+    display: inline-block;
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 75px;
+    font-weight: 700;
+    font-family: 'Exo 2';
+    line-height: 0.8;
+    color: #fbd62a;
+    text-shadow: 0 -1px 15px rgba(0, 0, 0, 0.9), 0 1px 0 #7f6303, 0 3px 0 #846703, 0 5px 0 #896b03, 0 7px 0 #8e6f03, 0 9px 0 #937203, 0 6px 50px rgba(252, 223, 92, 0.8);
+  }
+  .logo a:first-line {
+    font-size: 0.8em;
+  }
+  .logo a:hover {
+    -webkit-transform: perspective(8em) rotateX(11deg) scale(1.2);
+    -moz-transform: perspective(8em) rotateX(11deg) scale(1.2);
+    -ms-transform: perspective(8em) rotateX(11deg) scale(1.2);
+    -o-transform: perspective(8em) rotateX(11deg) scale(1.2);
+    transform: perspective(8em) rotateX(11deg) scale(1.2);
+    cursor: default;
+    text-shadow: 0 -1px 15px black, 0 1px 0 #7f6303, 0 2px 0 #846703, 0 0px 0 #896b03, 0 1px 0 #8e6f03, 0 2px 0 #937203, 0 2px 30px rgba(252, 223, 92, 0.6);
+  }
+</style>
+
+</html>
